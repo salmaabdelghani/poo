@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef  } from "react";
 
 // ─── API CONFIG ───────────────────────────────────────────────
 const BASE = "http://localhost:8080";
@@ -587,52 +587,492 @@ function UserForm({ initial, onSave, onCancel, creds }) {
   );
 }
 
-// ─── DASHBOARD ───────────────────────────────────────────────
-function Dashboard({ creds, addToast }) {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+// ─── STATISTICS DASHBOARD ─────────────────────────────────────
+// Remplace ta fonction Dashboard par celle-ci
 
-  useEffect(() => {
-    apiFetch("/api/statistics/overview", creds)
-      .then(setStats)
-      .catch(() => setStats(null))
-      .finally(() => setLoading(false));
-  }, []);
+const REFRESH_INTERVAL = 30000; // 30 secondes
 
-  if (loading) return <div style={{ padding: 60, textAlign: "center", color: "var(--muted)" }}>Chargement du tableau de bord...</div>;
-  if (!stats) return (
-    <div style={{ padding: 60, textAlign: "center" }}>
-      <div style={{ color: "var(--muted)", fontSize: 15 }}>Statistiques disponibles pour les rôles RESPONSABLE et ADMINISTRATEUR.</div>
-    </div>
-  );
+// Palette cohérente avec le thème dark (#0f1117)
+const CHART_COLORS = {
+  formations: { line: "#6366f1", fill: "#6366f133", bar: "#818cf8cc" },
+  formateurs:  { pie1: "#f59e0b", pie2: "#fde68a", bar: "#fbbf24cc" },
+  participants:{ line: "#10b981", fill: "#10b98133", bar: "#34d399cc" },
+  finance:     { bar1: "#3b82f6cc", bar2: "#93c5fdcc" },
+};
 
-  const cards = [
-    { label: "Formations", value: stats.totalFormations, icon: "formations", color: "#6366f1" },
-    { label: "Participants", value: stats.totalParticipants, icon: "participants", color: "#10b981" },
-    { label: "Formateurs", value: stats.totalFormateurs, icon: "formateurs", color: "#f59e0b" },
-    { label: "Domaines", value: stats.totalDomaines, icon: "domaines", color: "#3b82f6" },
-    { label: "Structures", value: stats.totalStructures, icon: "structures", color: "#8b5cf6" },
-    { label: "Utilisateurs", value: stats.totalUsers, icon: "users", color: "#ec4899" },
-    { label: "Employeurs", value: stats.totalEmployeurs, icon: "employeurs", color: "#14b8a6" },
-    { label: "Profils", value: stats.totalProfils, icon: "profils", color: "#f97316" },
-  ];
+const gridColor   = "rgba(255,255,255,0.07)";
+const tickColor   = "#7b82a8";
 
+function baseChartOptions(extra = {}) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: tickColor, font: { size: 11 } }, grid: { color: gridColor } },
+      y: { ticks: { color: tickColor, font: { size: 11 } }, grid: { color: gridColor }, beginAtZero: true, ...extra },
+    },
+  };
+}
+
+// ─── Composant chart-card wrapper ────────────────────────────
+function ChartCard({ title, height = 200, children }) {
   return (
-    <div>
-      <h1 style={{ margin: "0 0 28px", fontSize: 26, fontWeight: 800, color: "var(--text)" }}>Tableau de bord</h1>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, marginBottom: 32 }}>
-        {cards.map((c) => <StatCard key={c.label} {...c} />)}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 20 }}>
-        <BarChart data={stats.formationsByDomain} title="Formations par domaine" />
-        <BarChart data={stats.participantsByStructure} title="Participants par structure" />
-        <BarChart data={stats.participantsByProfile} title="Participants par profil" />
-        <BarChart data={stats.formateursByType} title="Formateurs par type" />
+    <div style={{
+      background: "var(--card)", borderRadius: 14, padding: "18px 20px",
+      border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        {title}
+      </p>
+      <div style={{ position: "relative", height }}>
+        {children}
       </div>
     </div>
   );
 }
 
+// ─── Section header ───────────────────────────────────────────
+function SectionHeader({ icon, title, color }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+      <div style={{ width: 32, height: 32, background: color + "22", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color }}>
+        <Icon name={icon} size={17} />
+      </div>
+      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text)" }}>{title}</h2>
+    </div>
+  );
+}
+
+// ─── Legend ───────────────────────────────────────────────────
+function ChartLegend({ items }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
+      {items.map((item) => (
+        <span key={item.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--muted)" }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: item.color, display: "inline-block" }} />
+          {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── Charger Chart.js une seule fois ─────────────────────────
+let chartJsLoaded = false;
+function loadChartJs() {
+  return new Promise((resolve) => {
+    if (window.Chart) { resolve(); return; }
+    if (chartJsLoaded) { const wait = () => window.Chart ? resolve() : setTimeout(wait, 50); wait(); return; }
+    chartJsLoaded = true;
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
+    s.onload = resolve;
+    document.head.appendChild(s);
+  });
+}
+
+// ─── Hook générique pour un canvas Chart.js ──────────────────
+function useChart(canvasRef, config) {
+  const chartRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current || !config) return;
+    loadChartJs().then(() => {
+      if (chartRef.current) chartRef.current.destroy();
+      chartRef.current = new window.Chart(canvasRef.current, config);
+    });
+    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
+  }, [JSON.stringify(config)]);
+}
+
+// ─── Section 1 : Formations ────────────────────────────────
+function FormationsSection({ stats }) {
+  const months = ["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
+  const c1 = useRef(), c2 = useRef();
+
+  useChart(c1, stats && {
+    type: "line",
+    data: {
+      labels: months,
+      datasets: [{
+        label: "Formations", data: stats.formationsByMonth || Array(12).fill(0),
+        borderColor: CHART_COLORS.formations.line,
+        backgroundColor: CHART_COLORS.formations.fill,
+        fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: CHART_COLORS.formations.line,
+      }],
+    },
+    options: baseChartOptions(),
+  });
+
+  useChart(c2, stats && {
+    type: "bar",
+    data: {
+      labels: stats.formationsByDomain?.map((d) => d.label) || [],
+      datasets: [{ label: "Formations", data: stats.formationsByDomain?.map((d) => d.count) || [], backgroundColor: CHART_COLORS.formations.bar, borderRadius: 4 }],
+    },
+    options: baseChartOptions(),
+  });
+
+  return (
+    <div style={{ marginBottom: 36 }}>
+      <SectionHeader icon="formations" title="Formations" color="#6366f1" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <ChartCard title="Par mois (année en cours)">
+          <ChartLegend items={[{ label: "Formations", color: CHART_COLORS.formations.line }]} />
+          <canvas ref={c1} role="img" aria-label="Formations par mois" />
+        </ChartCard>
+        <ChartCard title="Par domaine">
+          <ChartLegend items={[{ label: "Formations", color: CHART_COLORS.formations.bar }]} />
+          <canvas ref={c2} role="img" aria-label="Formations par domaine" />
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section 2 : Formateurs ────────────────────────────────
+function FormateursSection({ stats }) {
+  const c3 = useRef(), c4 = useRef();
+  const interne = stats?.formateursByType?.find((t) => t.label === "INTERNE")?.count || 0;
+  const externe = stats?.formateursByType?.find((t) => t.label === "EXTERNE")?.count || 0;
+  const total = interne + externe || 1;
+  const pctInt = Math.round((interne / total) * 100);
+  const pctExt = 100 - pctInt;
+
+  const formateurs = stats?.formationsByFormateur || [];
+  const hBarHeight = Math.max(160, formateurs.length * 42 + 60);
+
+  useChart(c3, stats && {
+    type: "pie",
+    data: {
+      labels: ["Interne", "Externe"],
+      datasets: [{ data: [interne, externe], backgroundColor: [CHART_COLORS.formateurs.pie1, CHART_COLORS.formateurs.pie2], borderColor: "#1a1d27", borderWidth: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.raw} (${ctx.dataIndex === 0 ? pctInt : pctExt}%)` } },
+      },
+    },
+  });
+
+  useChart(c4, stats && {
+    type: "bar",
+    data: {
+      labels: formateurs.map((f) => f.label),
+      datasets: [{ label: "Formations", data: formateurs.map((f) => f.count), backgroundColor: CHART_COLORS.formateurs.bar, borderRadius: 4 }],
+    },
+    options: {
+      ...baseChartOptions(),
+      indexAxis: "y",
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 11 }, stepSize: 1 }, grid: { color: gridColor }, beginAtZero: true },
+        y: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: "transparent" } },
+      },
+    },
+  });
+
+  return (
+    <div style={{ marginBottom: 36 }}>
+      <SectionHeader icon="formateurs" title="Formateurs" color="#f59e0b" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <ChartCard title="Internes vs Externes">
+          <ChartLegend items={[
+            { label: `Interne ${pctInt}%`, color: CHART_COLORS.formateurs.pie1 },
+            { label: `Externe ${pctExt}%`, color: CHART_COLORS.formateurs.pie2 },
+          ]} />
+          <canvas ref={c3} role="img" aria-label="Répartition formateurs" />
+        </ChartCard>
+        <ChartCard title="Formations par formateur" height={hBarHeight}>
+          <ChartLegend items={[{ label: "Formations", color: CHART_COLORS.formateurs.bar }]} />
+          <canvas ref={c4} role="img" aria-label="Formations par formateur" />
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section 3 : Participants ──────────────────────────────
+function ParticipantsSection({ stats }) {
+  const c5 = useRef(), c6 = useRef();
+
+  useChart(c5, stats && {
+    type: "line",
+    data: {
+      labels: stats.participantsByYear?.map((y) => y.label) || [],
+      datasets: [{
+        label: "Participants", data: stats.participantsByYear?.map((y) => y.count) || [],
+        borderColor: CHART_COLORS.participants.line,
+        backgroundColor: CHART_COLORS.participants.fill,
+        fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: CHART_COLORS.participants.line,
+      }],
+    },
+    options: baseChartOptions(),
+  });
+
+  useChart(c6, stats && {
+    type: "bar",
+    data: {
+      labels: stats.participantsByDomain?.map((d) => d.label) || [],
+      datasets: [{ label: "Participants", data: stats.participantsByDomain?.map((d) => d.count) || [], backgroundColor: CHART_COLORS.participants.bar, borderRadius: 4 }],
+    },
+    options: baseChartOptions(),
+  });
+
+  return (
+    <div style={{ marginBottom: 36 }}>
+      <SectionHeader icon="participants" title="Participants" color="#10b981" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <ChartCard title="Par année">
+          <ChartLegend items={[{ label: "Participants", color: CHART_COLORS.participants.line }]} />
+          <canvas ref={c5} role="img" aria-label="Participants par année" />
+        </ChartCard>
+        <ChartCard title="Par domaine">
+          <ChartLegend items={[{ label: "Participants", color: CHART_COLORS.participants.bar }]} />
+          <canvas ref={c6} role="img" aria-label="Participants par domaine" />
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section 4 : Finances ──────────────────────────────────
+function FinancesSection({ stats }) {
+  const c7 = useRef(), c8 = useRef();
+
+  useChart(c7, stats && {
+    type: "bar",
+    data: {
+      labels: stats.budgetByYear?.map((y) => y.label) || [],
+      datasets: [{ label: "Budget (DT)", data: stats.budgetByYear?.map((y) => y.total) || [], backgroundColor: CHART_COLORS.finance.bar1, borderRadius: 4 }],
+    },
+    options: {
+      ...baseChartOptions(),
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.raw.toLocaleString()} DT` } } },
+    },
+  });
+
+  useChart(c8, stats && {
+    type: "bar",
+    data: {
+      labels: stats.costByDomain?.map((d) => d.label) || [],
+      datasets: [
+        { label: "Budget total", data: stats.costByDomain?.map((d) => d.total) || [], backgroundColor: CHART_COLORS.finance.bar1, borderRadius: 4 },
+        { label: "Coût moyen",   data: stats.costByDomain?.map((d) => d.avg)   || [], backgroundColor: CHART_COLORS.finance.bar2, borderRadius: 4 },
+      ],
+    },
+    options: {
+      ...baseChartOptions(),
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} DT` } } },
+    },
+  });
+
+  return (
+    <div style={{ marginBottom: 36 }}>
+      <SectionHeader icon="stats" title="Finances" color="#3b82f6" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <ChartCard title="Budget total par année">
+          <ChartLegend items={[{ label: "Budget DT", color: CHART_COLORS.finance.bar1 }]} />
+          <canvas ref={c7} role="img" aria-label="Budget par année" />
+        </ChartCard>
+        <ChartCard title="Coût moyen par domaine">
+          <ChartLegend items={[
+            { label: "Budget total", color: CHART_COLORS.finance.bar1 },
+            { label: "Coût moyen",   color: CHART_COLORS.finance.bar2 },
+          ]} />
+          <canvas ref={c8} role="img" aria-label="Coût moyen par domaine" />
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD PRINCIPAL ──────────────────────────────────────
+function Dashboard({ creds, addToast }) {
+  const [stats, setStats]       = useState(null);
+  const [extStats, setExtStats] = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
+
+  const fetchAll = useCallback(async () => {
+    try {
+      // données existantes du /overview
+      const overview = await apiFetch("/api/statistics/overview", creds);
+      setStats(overview);
+
+      // données étendues pour les graphiques détaillés
+      const [formations, participants, formateurs, domaines] = await Promise.all([
+        apiFetch("/api/formations", creds),
+        apiFetch("/api/participants", creds),
+        apiFetch("/api/formateurs", creds),
+        apiFetch("/api/domaines", creds),
+      ]);
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+
+      // ── Formations par mois (année en cours) ──
+      const byMonth = Array(12).fill(0);
+      formations.forEach((f) => {
+        if (!f.dateFormation) return;
+        const d = new Date(f.dateFormation);
+        if (d.getFullYear() === currentYear) byMonth[d.getMonth()]++;
+      });
+
+      // ── Formations par domaine ──
+      const domainMap = {};
+      domaines.forEach((d) => { domainMap[d.id] = d.libelle; });
+      const domainCount = {};
+      formations.forEach((f) => {
+        const lbl = domainMap[f.domaineId] || "Autre";
+        domainCount[lbl] = (domainCount[lbl] || 0) + 1;
+      });
+      const formationsByDomain = Object.entries(domainCount).map(([label, count]) => ({ label, count }));
+
+      // ── Formateurs int/ext (déjà dans overview mais on reformate) ──
+      const formateursByType = [
+        { label: "INTERNE", count: formateurs.filter((f) => f.type === "INTERNE").length },
+        { label: "EXTERNE", count: formateurs.filter((f) => f.type === "EXTERNE").length },
+      ];
+
+      // ── Formations par formateur ──
+      const fmtCount = {};
+      const fmtName  = {};
+      formateurs.forEach((f) => { fmtName[f.id] = `${f.nom} ${f.prenom}`; fmtCount[f.id] = 0; });
+      formations.forEach((f) => { if (f.formateurId) fmtCount[f.formateurId] = (fmtCount[f.formateurId] || 0) + 1; });
+      const formationsByFormateur = Object.entries(fmtCount)
+        .map(([id, count]) => ({ label: fmtName[id] || `#${id}`, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 8);
+
+      // ── Participants par année ──
+      const partByYear = {};
+      participants.forEach((p) => {
+        // on utilise la date de création si disponible, sinon on skip
+        const year = p.annee || (p.createdAt ? new Date(p.createdAt).getFullYear() : null);
+        if (year) partByYear[year] = (partByYear[year] || 0) + 1;
+      });
+      // Fallback : répartir par formation si pas de date sur participants
+      if (Object.keys(partByYear).length === 0) {
+        formations.forEach((f) => {
+          if (f.annee && f.participants) {
+            partByYear[f.annee] = (partByYear[f.annee] || 0) + f.participants.length;
+          }
+        });
+      }
+      const participantsByYear = Object.entries(partByYear)
+        .sort(([a], [b]) => a - b)
+        .map(([label, count]) => ({ label, count }));
+
+      // ── Participants par domaine ──
+      const partByDomain = {};
+      formations.forEach((f) => {
+        const lbl = domainMap[f.domaineId] || "Autre";
+        partByDomain[lbl] = (partByDomain[lbl] || 0) + (f.participants?.length || 0);
+      });
+      const participantsByDomain = Object.entries(partByDomain).map(([label, count]) => ({ label, count }));
+
+      // ── Budget par année ──
+      const budgetYear = {};
+      formations.forEach((f) => {
+        if (f.annee && f.budget) budgetYear[f.annee] = (budgetYear[f.annee] || 0) + parseFloat(f.budget);
+      });
+      const budgetByYear = Object.entries(budgetYear)
+        .sort(([a], [b]) => a - b)
+        .map(([label, total]) => ({ label, total: Math.round(total) }));
+
+      // ── Coût moyen par domaine ──
+      const costDomain = {};
+      formations.forEach((f) => {
+        if (!f.budget) return;
+        const lbl = domainMap[f.domaineId] || "Autre";
+        if (!costDomain[lbl]) costDomain[lbl] = { total: 0, count: 0 };
+        costDomain[lbl].total += parseFloat(f.budget);
+        costDomain[lbl].count++;
+      });
+      const costByDomain = Object.entries(costDomain).map(([label, v]) => ({
+        label, total: Math.round(v.total), avg: Math.round(v.total / v.count),
+      }));
+
+      setExtStats({
+        formationsByMonth: byMonth,
+        formationsByDomain,
+        formateursByType,
+        formationsByFormateur,
+        participantsByYear,
+        participantsByDomain,
+        budgetByYear,
+        costByDomain,
+      });
+
+      setLastRefresh(new Date());
+    } catch (e) {
+      // si pas accès au stats, juste pas d'erreur bloquante
+    } finally {
+      setLoading(false);
+    }
+  }, [creds]);
+
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, REFRESH_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
+
+  if (loading) return (
+    <div style={{ padding: 60, textAlign: "center", color: "var(--muted)" }}>
+      Chargement du tableau de bord...
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: "var(--text)" }}>Tableau de bord</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--muted)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", display: "inline-block", animation: "pulse 2s infinite" }} />
+          {lastRefresh ? `Mis à jour à ${lastRefresh.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "Live"}
+        </div>
+      </div>
+
+      {/* Stat cards existantes */}
+      {stats && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, marginBottom: 40 }}>
+          {[
+            { label: "Formations",   value: stats.totalFormations,   icon: "formations",   color: "#6366f1" },
+            { label: "Participants", value: stats.totalParticipants, icon: "participants", color: "#10b981" },
+            { label: "Formateurs",   value: stats.totalFormateurs,   icon: "formateurs",   color: "#f59e0b" },
+            { label: "Domaines",     value: stats.totalDomaines,     icon: "domaines",     color: "#3b82f6" },
+            { label: "Structures",   value: stats.totalStructures,   icon: "structures",   color: "#8b5cf6" },
+            { label: "Utilisateurs", value: stats.totalUsers,        icon: "users",        color: "#ec4899" },
+            { label: "Employeurs",   value: stats.totalEmployeurs,   icon: "employeurs",   color: "#14b8a6" },
+            { label: "Profils",      value: stats.totalProfils,      icon: "profils",      color: "#f97316" },
+          ].map((c) => <StatCard key={c.label} {...c} />)}
+        </div>
+      )}
+
+      {/* 4 sections de graphiques */}
+      {extStats ? (
+        <>
+          <FormationsSection  stats={extStats} />
+          <FormateursSection  stats={extStats} />
+          <ParticipantsSection stats={extStats} />
+          <FinancesSection    stats={extStats} />
+        </>
+      ) : (
+        <div style={{ padding: 40, textAlign: "center", color: "var(--muted)", fontSize: 15 }}>
+          Statistiques détaillées disponibles pour les rôles RESPONSABLE et ADMINISTRATEUR.
+        </div>
+      )}
+
+      <style>{`
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+      `}</style>
+    </div>
+  );
+}
 // ─── MAIN APP ─────────────────────────────────────────────────
 export default function App() {
   const [creds, setCreds] = useState(null);
