@@ -201,28 +201,6 @@ function StatCard({ label, value, icon, color }) {
   );
 }
 
-// ─── BAR CHART ───────────────────────────────────────────────
-function BarChart({ data, title }) {
-  if (!data || data.length === 0) return null;
-  const max = Math.max(...data.map((d) => d.count), 1);
-  return (
-    <div style={{ background: "var(--card)", borderRadius: 14, padding: 24, border: "1px solid var(--border)" }}>
-      <h3 style={{ margin: "0 0 20px", fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{title}</h3>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {data.map((d, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 130, fontSize: 13, color: "var(--muted)", textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.label}</div>
-            <div style={{ flex: 1, background: "var(--surface)", borderRadius: 6, height: 22, overflow: "hidden" }}>
-              <div style={{ width: `${(d.count / max) * 100}%`, height: "100%", background: "var(--accent)", borderRadius: 6, transition: "width 0.8s ease", minWidth: d.count > 0 ? 8 : 0 }} />
-            </div>
-            <div style={{ width: 30, fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{d.count}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── LOGIN PAGE ───────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [login, setLogin] = useState("");
@@ -259,7 +237,7 @@ function LoginPage({ onLogin }) {
           <div style={{ width: 60, height: 60, background: "var(--accent)", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: "#fff" }}>
             <Icon name="formations" size={30} />
           </div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: "var(--text)" }}>Green Building</h1>
+          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: "var(--text)" }}>NextGen Training</h1>
           <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: 14 }}>Gestion des formations</p>
         </div>
         {error && (
@@ -278,20 +256,18 @@ function LoginPage({ onLogin }) {
         <Btn variant="primary" size="lg" onClick={handleSubmit} disabled={loading} style={{ width: "100%", justifyContent: "center", marginTop: 8 }}>
           {loading ? "Connexion..." : "Se connecter"}
         </Btn>
-        <p style={{ textAlign: "center", marginTop: 20, fontSize: 12, color: "var(--muted)" }}>
-          Défaut : admin / admin123 · responsable / responsable123
-        </p>
+        
       </div>
     </div>
   );
 }
 
 // ─── CRUD PAGE (generic) ─────────────────────────────────────
-function CrudPage({ title, icon, endpoint, creds, columns, FormComponent, addToast, isAdmin }) {
+// canWrite = peut créer/modifier/supprimer
+function CrudPage({ title, icon, endpoint, creds, columns, FormComponent, addToast, canWrite }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null); // null | "create" | item
-  const [deleting, setDeleting] = useState(null);
+  const [modal, setModal] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -338,7 +314,8 @@ function CrudPage({ title, icon, endpoint, creds, columns, FormComponent, addToa
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: "var(--text)" }}>{title}</h1>
           <span style={{ background: "var(--surface)", color: "var(--muted)", borderRadius: 20, padding: "3px 10px", fontSize: 13, fontWeight: 600 }}>{items.length}</span>
         </div>
-        {isAdmin !== false && (
+        {/* Bouton Ajouter uniquement si canWrite */}
+        {canWrite && (
           <Btn icon="add" onClick={() => setModal("create")}>Ajouter</Btn>
         )}
       </div>
@@ -346,13 +323,16 @@ function CrudPage({ title, icon, endpoint, creds, columns, FormComponent, addToa
         {loading ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--muted)" }}>Chargement...</div>
         ) : (
-          <Table cols={columns} rows={items}
-            onEdit={(item) => setModal(item)}
-            onDelete={isAdmin !== false ? handleDelete : null}
+          <Table
+            cols={columns}
+            rows={items}
+            // Éditer et Supprimer uniquement si canWrite
+            onEdit={canWrite ? (item) => setModal(item) : null}
+            onDelete={canWrite ? handleDelete : null}
           />
         )}
       </div>
-      {modal && (
+      {modal && canWrite && (
         <Modal title={modal === "create" ? `Nouveau — ${title}` : `Modifier`} onClose={() => setModal(null)}>
           <FormComponent
             initial={modal !== "create" ? modal : null}
@@ -579,7 +559,7 @@ function UserForm({ initial, onSave, onCancel, creds }) {
           const payload = { login: form.login, roleId: parseInt(form.roleId) };
           if (form.password) payload.password = form.password;
           else if (!initial) { alert("Mot de passe requis"); return; }
-          else payload.password = "UNCHANGED_" + Date.now(); // placeholder
+          else payload.password = "UNCHANGED_" + Date.now();
           onSave(payload, initial?.id);
         }}>Enregistrer</Btn>
       </div>
@@ -588,13 +568,11 @@ function UserForm({ initial, onSave, onCancel, creds }) {
 }
 
 // ─── DASHBOARD ───────────────────────────────────────────────
-// ─── DASHBOARD ───────────────────────────────────────────────
 function Dashboard({ creds, addToast }) {
   const [stats, setStats] = useState(null);
   const [extStats, setExtStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Fetch overview stats (existant) ──
   const fetchStats = useCallback(async () => {
     try {
       const data = await apiFetch("/api/statistics/overview", creds);
@@ -604,7 +582,6 @@ function Dashboard({ creds, addToast }) {
     }
   }, [creds]);
 
-  // ── Fetch extended stats (nouvelles requêtes) ──
   const fetchExtStats = useCallback(async () => {
     try {
       const [formations, formateurs, participants] = await Promise.all([
@@ -613,7 +590,6 @@ function Dashboard({ creds, addToast }) {
         apiFetch("/api/participants", creds),
       ]);
 
-      // Formations par mois (année courante)
       const currentYear = new Date().getFullYear();
       const monthNames = ["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
       const byMonth = Array.from({ length: 12 }, (_, i) => ({ label: monthNames[i], count: 0 }));
@@ -624,7 +600,6 @@ function Dashboard({ creds, addToast }) {
         }
       });
 
-      // Formations par domaine
       const domainMap = {};
       formations.forEach(f => {
         const k = f.domaineLibelle || "Autre";
@@ -634,12 +609,10 @@ function Dashboard({ creds, addToast }) {
         .map(([label, count]) => ({ label, count }))
         .sort((a, b) => b.count - a.count);
 
-      // Formateurs interne vs externe
       const typeMap = { INTERNE: 0, EXTERNE: 0 };
       formateurs.forEach(f => { typeMap[f.type] = (typeMap[f.type] || 0) + 1; });
       const formateursByType = Object.entries(typeMap).map(([label, count]) => ({ label, count }));
 
-      // Formations par formateur
       const fmtMap = {};
       formations.forEach(f => {
         if (f.formateurNom) {
@@ -651,7 +624,6 @@ function Dashboard({ creds, addToast }) {
         .map(([label, count]) => ({ label, count }))
         .sort((a, b) => b.count - a.count).slice(0, 6);
 
-      // Participants par année
       const yearMap = {};
       formations.forEach(f => {
         const y = String(f.annee);
@@ -661,7 +633,6 @@ function Dashboard({ creds, addToast }) {
         .map(([label, count]) => ({ label, count }))
         .sort((a, b) => a.label.localeCompare(b.label));
 
-      // Participants par domaine
       const pdMap = {};
       formations.forEach(f => {
         const k = f.domaineLibelle || "Autre";
@@ -671,7 +642,6 @@ function Dashboard({ creds, addToast }) {
         .map(([label, count]) => ({ label, count }))
         .sort((a, b) => b.count - a.count);
 
-      // Budget par année
       const budgetMap = {};
       formations.forEach(f => {
         const y = String(f.annee);
@@ -681,7 +651,6 @@ function Dashboard({ creds, addToast }) {
         .map(([label, count]) => ({ label, count: Math.round(count) }))
         .sort((a, b) => a.label.localeCompare(b.label));
 
-      // Coût moyen par domaine
       const costMap = {};
       const countMap = {};
       formations.forEach(f => {
@@ -708,12 +677,10 @@ function Dashboard({ creds, addToast }) {
     }
   }, [creds]);
 
-  // ── Initial load ──
   useEffect(() => {
     Promise.all([fetchStats(), fetchExtStats()]).finally(() => setLoading(false));
   }, []);
 
-  // ── Polling live toutes les 30s ──
   useEffect(() => {
     const id = setInterval(() => {
       fetchStats();
@@ -733,35 +700,30 @@ function Dashboard({ creds, addToast }) {
       <h1 style={{ margin: "0 0 28px", fontSize: 26, fontWeight: 800, color: "var(--text)" }}>
         Tableau de bord
       </h1>
-
-      {/* ── Stat cards (existantes) ── */}
       {stats && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16, marginBottom: 36 }}>
           {[
-            { label: "Formations",   value: stats.totalFormations,  icon: "formations",  color: "#6366f1" },
-            { label: "Participants", value: stats.totalParticipants, icon: "participants", color: "#10b981" },
-            { label: "Formateurs",   value: stats.totalFormateurs,   icon: "formateurs",  color: "#f59e0b" },
-            { label: "Domaines",     value: stats.totalDomaines,     icon: "domaines",    color: "#3b82f6" },
-            { label: "Structures",   value: stats.totalStructures,   icon: "structures",  color: "#8b5cf6" },
-            { label: "Utilisateurs", value: stats.totalUsers,        icon: "users",       color: "#ec4899" },
-            { label: "Employeurs",   value: stats.totalEmployeurs,   icon: "employeurs",  color: "#14b8a6" },
-            { label: "Profils",      value: stats.totalProfils,      icon: "profils",     color: "#f97316" },
+            { label: "Formations",   value: stats.totalFormations,   icon: "formations",  color: "#6366f1" },
+            { label: "Participants", value: stats.totalParticipants,  icon: "participants", color: "#10b981" },
+            { label: "Formateurs",   value: stats.totalFormateurs,    icon: "formateurs",  color: "#f59e0b" },
+            { label: "Domaines",     value: stats.totalDomaines,      icon: "domaines",    color: "#3b82f6" },
+            { label: "Structures",   value: stats.totalStructures,    icon: "structures",  color: "#8b5cf6" },
+            { label: "Utilisateurs", value: stats.totalUsers,         icon: "users",       color: "#ec4899" },
+            { label: "Employeurs",   value: stats.totalEmployeurs,    icon: "employeurs",  color: "#14b8a6" },
+            { label: "Profils",      value: stats.totalProfils,       icon: "profils",     color: "#f97316" },
           ].map((c) => <StatCard key={c.label} {...c} />)}
         </div>
       )}
-
-      {/* ── Graphiques étendus ── */}
       {extStats && <StatsDashboard data={extStats} />}
     </div>
   );
 }
 
-// ─── STATS DASHBOARD (4 sections) ────────────────────────────
+// ─── STATS DASHBOARD ─────────────────────────────────────────
 function StatsDashboard({ data }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
       <StatsSection title="Formations">
-        
         <StatsCard title="Formations par domaine" accent="#6366f1">
           <HBarChart data={data.formationsByDomain} color="#6366f1" />
         </StatsCard>
@@ -775,7 +737,6 @@ function StatsDashboard({ data }) {
           <HBarChart data={data.formationsByFormateur} color="#f59e0b" />
         </StatsCard>
       </StatsSection>
-
 
       <StatsSection title="Statistiques financières">
         <StatsCard title="Budget total par année (DT)" accent="#3b82f6">
@@ -797,7 +758,6 @@ function StatsDashboard({ data }) {
   );
 }
 
-// ── Layout helpers ──────────────────────────────────────────
 function StatsSection({ title, children }) {
   return (
     <div>
@@ -827,7 +787,6 @@ function StatsCard({ title, accent, children }) {
   );
 }
 
-// ── Line Chart (SVG natif) ──────────────────────────────────
 function LineChart({ data, color }) {
   if (!data || data.length < 2) return null;
   const W = 300, H = 120, pL = 30, pR = 10, pT = 10, pB = 24;
@@ -836,38 +795,28 @@ function LineChart({ data, color }) {
   const ys = data.map(d => pT + (1 - d.count / max) * (H - pT - pB));
   const pts = xs.map((x, i) => `${x},${ys[i]}`).join(" ");
   const areaD = `M${xs[0]},${ys[0]} ${xs.map((x, i) => `L${x},${ys[i]}`).join(" ")} L${xs[xs.length-1]},${H - pB} L${xs[0]},${H - pB} Z`;
-
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", display: "block" }}>
-      {/* Grid */}
       {[0, 0.5, 1].map((t, i) => {
         const y = pT + t * (H - pT - pB);
         return (
           <g key={i}>
             <line x1={pL} y1={y} x2={W - pR} y2={y} stroke="var(--border)" strokeWidth="0.5" />
-            <text x={pL - 4} y={y + 4} textAnchor="end" fill="var(--muted)" fontSize="8"
-              fontFamily="'DM Sans', sans-serif">
+            <text x={pL - 4} y={y + 4} textAnchor="end" fill="var(--muted)" fontSize="8" fontFamily="'DM Sans', sans-serif">
               {Math.round(max * (1 - t))}
             </text>
           </g>
         );
       })}
-      {/* Area fill */}
       <path d={areaD} fill={color} opacity="0.08" />
-      {/* Line */}
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2"
-        strokeLinejoin="round" strokeLinecap="round" />
-      {/* Dots */}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       {xs.map((x, i) => (
-        <circle key={i} cx={x} cy={ys[i]} r="3" fill={color}
-          stroke="var(--card)" strokeWidth="1.5" />
+        <circle key={i} cx={x} cy={ys[i]} r="3" fill={color} stroke="var(--card)" strokeWidth="1.5" />
       ))}
-      {/* X labels (skip if too many) */}
       {data.map((d, i) => {
         if (data.length > 8 && i % 2 !== 0) return null;
         return (
-          <text key={i} x={xs[i]} y={H - 4} textAnchor="middle"
-            fill="var(--muted)" fontSize="8" fontFamily="'DM Sans', sans-serif">
+          <text key={i} x={xs[i]} y={H - 4} textAnchor="middle" fill="var(--muted)" fontSize="8" fontFamily="'DM Sans', sans-serif">
             {d.label}
           </text>
         );
@@ -876,7 +825,6 @@ function LineChart({ data, color }) {
   );
 }
 
-// ── Horizontal Bar Chart ────────────────────────────────────
 function HBarChart({ data, color, fmt }) {
   if (!data || data.length === 0) return null;
   const max = Math.max(...data.map(d => d.count), 1);
@@ -884,17 +832,9 @@ function HBarChart({ data, color, fmt }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {data.slice(0, 7).map((d, i) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 110, fontSize: 12, color: "var(--muted)", textAlign: "right",
-            flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>{d.label}</div>
+          <div style={{ width: 110, fontSize: 12, color: "var(--muted)", textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.label}</div>
           <div style={{ flex: 1, background: "var(--surface)", borderRadius: 5, height: 20, overflow: "hidden" }}>
-            <div style={{
-              width: `${(d.count / max) * 100}%`, height: "100%",
-              background: color, borderRadius: 5,
-              transition: "width 0.8s ease", minWidth: d.count > 0 ? 6 : 0,
-              opacity: 0.85,
-            }} />
+            <div style={{ width: `${(d.count / max) * 100}%`, height: "100%", background: color, borderRadius: 5, transition: "width 0.8s ease", minWidth: d.count > 0 ? 6 : 0, opacity: 0.85 }} />
           </div>
           <div style={{ width: 48, fontSize: 12, fontWeight: 600, color: "var(--text)", textAlign: "right" }}>
             {fmt ? fmt(d.count) : d.count}
@@ -905,104 +845,50 @@ function HBarChart({ data, color, fmt }) {
   );
 }
 
-// ── Pie Chart (SVG natif) ───────────────────────────────────
 function PieChart({ data, colors }) {
   if (!data || data.length === 0) return null;
   const total = data.reduce((s, d) => s + d.count, 0);
   if (total === 0) return (
-    <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13, padding: "20px 0" }}>
-      Aucune donnée
-    </div>
+    <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13, padding: "20px 0" }}>Aucune donnée</div>
   );
-
   const cx = 70, cy = 70, r = 58, ri = 32;
   let angle = -Math.PI / 2;
-
   const slices = data.map((d, i) => {
     const a = (d.count / total) * 2 * Math.PI;
-    // Evite le bug du cercle complet (100%) avec un epsilon
     const safeA = Math.min(a, 2 * Math.PI - 0.0001);
-    const x1  = cx + r  * Math.cos(angle),        y1  = cy + r  * Math.sin(angle);
-    const x2  = cx + r  * Math.cos(angle + safeA), y2  = cy + r  * Math.sin(angle + safeA);
-    const xi1 = cx + ri * Math.cos(angle),         yi1 = cy + ri * Math.sin(angle);
-    const xi2 = cx + ri * Math.cos(angle + safeA), yi2 = cy + ri * Math.sin(angle + safeA);
+    const x1  = cx + r  * Math.cos(angle),         y1  = cy + r  * Math.sin(angle);
+    const x2  = cx + r  * Math.cos(angle + safeA),  y2  = cy + r  * Math.sin(angle + safeA);
+    const xi1 = cx + ri * Math.cos(angle),          yi1 = cy + ri * Math.sin(angle);
+    const xi2 = cx + ri * Math.cos(angle + safeA),  yi2 = cy + ri * Math.sin(angle + safeA);
     const lg = safeA > Math.PI ? 1 : 0;
     const path = `M${xi1},${yi1} L${x1},${y1} A${r},${r} 0 ${lg},1 ${x2},${y2} L${xi2},${yi2} A${ri},${ri} 0 ${lg},0 ${xi1},${yi1} Z`;
-    const slice = {
-      path,
-      color: colors[i % colors.length],
-      count: d.count,
-      label: d.label,
-      pct: ((d.count / total) * 100).toFixed(1),
-    };
+    const slice = { path, color: colors[i % colors.length], count: d.count, label: d.label, pct: ((d.count / total) * 100).toFixed(1) };
     angle += safeA;
     return slice;
   });
-
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      gap: 20,
-      padding: "8px 0",
-    }}>
-      {/* Donut SVG centré */}
-      <svg
-        viewBox="0 0 140 140"
-        style={{ width: 140, height: 140, display: "block", overflow: "visible" }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20, padding: "8px 0" }}>
+      <svg viewBox="0 0 140 140" style={{ width: 140, height: 140, display: "block", overflow: "visible" }}>
         {slices.map((s, i) => (
-          <path key={i} d={s.path} fill={s.color} opacity="0.92"
-            stroke="var(--card)" strokeWidth="2" />
+          <path key={i} d={s.path} fill={s.color} opacity="0.92" stroke="var(--card)" strokeWidth="2" />
         ))}
-        {/* Trou central */}
         <circle cx={cx} cy={cy} r={ri - 1} fill="var(--card)" />
-        {/* Texte centré dans le donut */}
-        <text
-          x={cx} y={cy - 6}
-          textAnchor="middle" dominantBaseline="middle"
-          fill="var(--text)" fontSize="18" fontWeight="800"
-          fontFamily="'DM Sans', sans-serif"
-        >
-          {total}
-        </text>
-        <text
-          x={cx} y={cy + 12}
-          textAnchor="middle" dominantBaseline="middle"
-          fill="var(--muted)" fontSize="9"
-          fontFamily="'DM Sans', sans-serif"
-        >
-          total
-        </text>
+        <text x={cx} y={cy - 6} textAnchor="middle" dominantBaseline="middle" fill="var(--text)" fontSize="18" fontWeight="800" fontFamily="'DM Sans', sans-serif">{total}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" dominantBaseline="middle" fill="var(--muted)" fontSize="9" fontFamily="'DM Sans', sans-serif">total</text>
       </svg>
-
-      {/* Légende centrée sous le donut */}
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        gap: "10px 20px",
-        width: "100%",
-      }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "10px 20px", width: "100%" }}>
         {slices.map((s, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <div style={{
-              width: 11, height: 11, borderRadius: "50%",
-              background: s.color, flexShrink: 0,
-            }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
-              {s.pct}%
-            </span>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {s.label} ({s.count})
-            </span>
+            <div style={{ width: 11, height: 11, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{s.pct}%</span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.label} ({s.count})</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
+
 // ─── MAIN APP ─────────────────────────────────────────────────
 export default function App() {
   const [creds, setCreds] = useState(null);
@@ -1016,18 +902,24 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
 
+  // ── Détection du rôle après login ──────────────────────────
+  // ADMINISTRATEUR : peut accéder à /api/users
+  // RESPONSABLE    : peut accéder à /api/statistics/overview mais pas /api/users
+  // SIMPLE_USER    : accès uniquement formations / formateurs / participants
   const handleLogin = async (c) => {
     setCreds(c);
-    // Detect role
     try {
-      const users = await apiFetch("/api/users", c);
+      await apiFetch("/api/users", c);
       setRole("ADMINISTRATEUR");
+      setPage("dashboard");
     } catch {
       try {
         await apiFetch("/api/statistics/overview", c);
         setRole("RESPONSABLE");
+        setPage("dashboard");
       } catch {
         setRole("SIMPLE_USER");
+        setPage("formations"); // Le simple user n'a pas accès au dashboard
       }
     }
   };
@@ -1046,96 +938,157 @@ export default function App() {
     </>
   );
 
-  const isAdmin = role === "ADMINISTRATEUR";
-  const isAdminOrResp = role === "ADMINISTRATEUR" || role === "RESPONSABLE";
+  // ── Calcul des permissions ──────────────────────────────────
+  const isAdmin      = role === "ADMINISTRATEUR";
+  const isResponsable = role === "RESPONSABLE";
+  const isSimpleUser  = role === "SIMPLE_USER";
+  const isAdminOrResp = isAdmin || isResponsable;
 
+  // Simple user  : peut écrire formations / formateurs / participants
+  // Responsable  : lecture seule (dashboard stats uniquement)
+  // Admin        : tout
+  const canWriteMain   = isAdmin || isSimpleUser;  // formations, formateurs, participants
+  const canWriteAdmin  = isAdmin;                  // domaines, structures, profils, employeurs, users
+
+  // ── Navigation selon rôle ───────────────────────────────────
   const nav = [
-    { id: "dashboard", label: "Tableau de bord", icon: "dashboard", show: isAdminOrResp },
-    { id: "formations", label: "Formations", icon: "formations", show: true },
-    { id: "participants", label: "Participants", icon: "participants", show: true },
-    { id: "formateurs", label: "Formateurs", icon: "formateurs", show: true },
-    { id: "domaines", label: "Domaines", icon: "domaines", show: true },
-    { id: "structures", label: "Structures", icon: "structures", show: true },
-    { id: "profils", label: "Profils", icon: "profils", show: true },
-    { id: "employeurs", label: "Employeurs", icon: "employeurs", show: true },
-    { id: "users", label: "Utilisateurs", icon: "users", show: isAdmin },
+    // Dashboard : admin et responsable uniquement
+    { id: "dashboard",    label: "Tableau de bord", icon: "dashboard",    show: isAdminOrResp },
+    // Gestion opérationnelle : simple user + admin (responsable exclut)
+    { id: "formations",   label: "Formations",       icon: "formations",   show: isAdmin || isSimpleUser },
+    { id: "participants", label: "Participants",      icon: "participants", show: isAdmin || isSimpleUser },
+    { id: "formateurs",   label: "Formateurs",       icon: "formateurs",   show: isAdmin || isSimpleUser },
+    // Référentiels : admin uniquement
+    { id: "domaines",     label: "Domaines",         icon: "domaines",     show: isAdmin },
+    { id: "structures",   label: "Structures",       icon: "structures",   show: isAdmin },
+    { id: "profils",      label: "Profils",          icon: "profils",      show: isAdmin },
+    { id: "employeurs",   label: "Employeurs",       icon: "employeurs",   show: isAdmin },
+    // Gestion utilisateurs : admin uniquement
+    { id: "users",        label: "Utilisateurs",     icon: "users",        show: isAdmin },
   ].filter((n) => n.show);
 
+  // ── Rendu des pages ─────────────────────────────────────────
   const renderPage = () => {
     switch (page) {
-      case "dashboard": return <Dashboard creds={creds} addToast={addToast} />;
-      case "formations": return (
-        <CrudPage title="Formations" icon="formations" endpoint="/api/formations" creds={creds} addToast={addToast}
-          columns={[
-            { key: "titre", label: "Titre" },
-            { key: "annee", label: "Année" },
-            { key: "dureeJours", label: "Durée (j)" },
-            { key: "lieu", label: "Lieu" },
-            { key: "dateFormation", label: "Date" },
-            { key: "domaineLibelle", label: "Domaine" },
-            { key: "formateurNom", label: "Formateur", render: (v, row) => v ? `${v} ${row.formateurPrenom}` : "—" },
-            { key: "budget", label: "Budget", render: (v) => v ? `${v} DT` : "—" },
-          ]}
-          FormComponent={FormationForm}
-        />
-      );
-      case "participants": return (
-        <CrudPage title="Participants" icon="participants" endpoint="/api/participants" creds={creds} addToast={addToast}
-          columns={[
-            { key: "nom", label: "Nom" }, { key: "prenom", label: "Prénom" },
-            { key: "email", label: "Email" }, { key: "tel", label: "Tél" },
-            { key: "structureLibelle", label: "Structure" }, { key: "profilLibelle", label: "Profil" },
-          ]}
-          FormComponent={ParticipantForm}
-        />
-      );
-      case "formateurs": return (
-        <CrudPage title="Formateurs" icon="formateurs" endpoint="/api/formateurs" creds={creds} addToast={addToast}
-          columns={[
-            { key: "nom", label: "Nom" }, { key: "prenom", label: "Prénom" },
-            { key: "email", label: "Email" }, { key: "tel", label: "Tél" },
-            { key: "type", label: "Type", render: (v) => <span style={{ background: v === "INTERNE" ? "#10b98122" : "#f59e0b22", color: v === "INTERNE" ? "#10b981" : "#f59e0b", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>{v}</span> },
-            { key: "employeurNom", label: "Employeur" },
-          ]}
-          FormComponent={FormateurForm}
-        />
-      );
-      case "domaines": return (
-        <CrudPage title="Domaines" icon="domaines" endpoint="/api/domaines" creds={creds} addToast={addToast}
-          columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
-          FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={120} />}
-        />
-      );
-      case "structures": return (
-        <CrudPage title="Structures" icon="structures" endpoint="/api/structures" creds={creds} addToast={addToast}
-          columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
-          FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={150} />}
-        />
-      );
-      case "profils": return (
-        <CrudPage title="Profils" icon="profils" endpoint="/api/profils" creds={creds} addToast={addToast}
-          columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
-          FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={120} />}
-        />
-      );
-      case "employeurs": return (
-        <CrudPage title="Employeurs" icon="employeurs" endpoint="/api/employeurs" creds={creds} addToast={addToast}
-          columns={[{ key: "id", label: "ID" }, { key: "nomEmployeur", label: "Nom" }]}
-          FormComponent={EmployeurForm}
-        />
-      );
-      case "users": return (
-        <CrudPage title="Utilisateurs" icon="users" endpoint="/api/users" creds={creds} addToast={addToast} isAdmin={isAdmin}
-          columns={[
-            { key: "id", label: "ID" }, { key: "login", label: "Login" },
-            { key: "roleName", label: "Rôle", render: (v) => {
-              const colors = { ADMINISTRATEUR: "#6366f1", RESPONSABLE: "#10b981", SIMPLE_USER: "#7b82a8" };
-              return <span style={{ background: (colors[v] || "#7b82a8") + "22", color: colors[v] || "#7b82a8", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>{v}</span>;
-            }},
-          ]}
-          FormComponent={UserForm}
-        />
-      );
+      case "dashboard":
+        // Sécurité : seuls admin et responsable peuvent voir le dashboard
+        if (!isAdminOrResp) return null;
+        return <Dashboard creds={creds} addToast={addToast} />;
+
+      case "formations":
+        return (
+          <CrudPage
+            title="Formations" icon="formations" endpoint="/api/formations"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteMain}
+            columns={[
+              { key: "titre", label: "Titre" },
+              { key: "annee", label: "Année" },
+              { key: "dureeJours", label: "Durée (j)" },
+              { key: "lieu", label: "Lieu" },
+              { key: "dateFormation", label: "Date" },
+              { key: "domaineLibelle", label: "Domaine" },
+              { key: "formateurNom", label: "Formateur", render: (v, row) => v ? `${v} ${row.formateurPrenom}` : "—" },
+              { key: "budget", label: "Budget", render: (v) => v ? `${v} DT` : "—" },
+            ]}
+            FormComponent={FormationForm}
+          />
+        );
+
+      case "participants":
+        return (
+          <CrudPage
+            title="Participants" icon="participants" endpoint="/api/participants"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteMain}
+            columns={[
+              { key: "nom", label: "Nom" }, { key: "prenom", label: "Prénom" },
+              { key: "email", label: "Email" }, { key: "tel", label: "Tél" },
+              { key: "structureLibelle", label: "Structure" }, { key: "profilLibelle", label: "Profil" },
+            ]}
+            FormComponent={ParticipantForm}
+          />
+        );
+
+      case "formateurs":
+        return (
+          <CrudPage
+            title="Formateurs" icon="formateurs" endpoint="/api/formateurs"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteMain}
+            columns={[
+              { key: "nom", label: "Nom" }, { key: "prenom", label: "Prénom" },
+              { key: "email", label: "Email" }, { key: "tel", label: "Tél" },
+              { key: "type", label: "Type", render: (v) => (
+                <span style={{ background: v === "INTERNE" ? "#10b98122" : "#f59e0b22", color: v === "INTERNE" ? "#10b981" : "#f59e0b", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>{v}</span>
+              )},
+              { key: "employeurNom", label: "Employeur" },
+            ]}
+            FormComponent={FormateurForm}
+          />
+        );
+
+      case "domaines":
+        return (
+          <CrudPage
+            title="Domaines" icon="domaines" endpoint="/api/domaines"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteAdmin}
+            columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
+            FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={120} />}
+          />
+        );
+
+      case "structures":
+        return (
+          <CrudPage
+            title="Structures" icon="structures" endpoint="/api/structures"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteAdmin}
+            columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
+            FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={150} />}
+          />
+        );
+
+      case "profils":
+        return (
+          <CrudPage
+            title="Profils" icon="profils" endpoint="/api/profils"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteAdmin}
+            columns={[{ key: "id", label: "ID" }, { key: "libelle", label: "Libellé" }]}
+            FormComponent={(p) => <SimpleLibelleForm {...p} maxLen={120} />}
+          />
+        );
+
+      case "employeurs":
+        return (
+          <CrudPage
+            title="Employeurs" icon="employeurs" endpoint="/api/employeurs"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteAdmin}
+            columns={[{ key: "id", label: "ID" }, { key: "nomEmployeur", label: "Nom" }]}
+            FormComponent={EmployeurForm}
+          />
+        );
+
+      case "users":
+        return (
+          <CrudPage
+            title="Utilisateurs" icon="users" endpoint="/api/users"
+            creds={creds} addToast={addToast}
+            canWrite={canWriteAdmin}
+            columns={[
+              { key: "id", label: "ID" }, { key: "login", label: "Login" },
+              { key: "roleName", label: "Rôle", render: (v) => {
+                const colors = { ADMINISTRATEUR: "#6366f1", RESPONSABLE: "#10b981", SIMPLE_USER: "#7b82a8" };
+                return <span style={{ background: (colors[v] || "#7b82a8") + "22", color: colors[v] || "#7b82a8", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 700 }}>{v}</span>;
+              }},
+            ]}
+            FormComponent={UserForm}
+          />
+        );
+
       default: return null;
     }
   };
@@ -1163,7 +1116,7 @@ export default function App() {
                 <Icon name="formations" size={18} />
               </div>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>Green Building</div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)" }}>NextGen Training</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>Formations</div>
               </div>
             </div>
